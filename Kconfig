@@ -1,0 +1,57 @@
+menu "OLED"
+
+	config OLED_WIDTH
+	int "Width (pixels)"
+	default 128
+	help
+		OLED display width
+
+	config OLED_HEIGHT
+	int "Height (pixels)"
+	default 128
+	help
+		OLED display height
+
+	config OLED_BPP
+	int "Bits per pixel"
+	default 4
+	help
+		OLED display bits per pixel
+
+	config OLED_FONT0
+	bool "Include 3x5 font"
+	default y 
+	help
+		Tiny 3x5 font, limited characters
+
+	config OLED_FONT1
+	bool "Include 5x9 font"
+	default y 
+	help
+		Small 5x9 font
+
+	config OLED_FONT2
+	bool "Include 10x18 font"
+	default y 
+	help
+		Medium 10x18 font
+
+	config OLED_FONT3
+	bool "Include 15x27 font"
+	default y 
+	help
+		Larger 15x27 font
+
+	config OLED_FONT4
+	bool "Include 20x36 font"
+	default y 
+	help
+		Large 20x36 font
+
+	config OLED_FONT5
+	bool "Include 25x45 font"
+	default y 
+	help
+		Extra large 25x45 font
+
+endmenu
