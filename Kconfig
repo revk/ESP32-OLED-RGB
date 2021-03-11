@@ -14,7 +14,7 @@ menu "OLED"
 
 	config OLED_BPP
 	int "Bits per pixel"
-	default 4
+	default 16
 	help
 		OLED display bits per pixel
 

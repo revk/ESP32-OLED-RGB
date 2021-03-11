@@ -5,6 +5,9 @@ static const char TAG[] = "OLED";
 #include <unistd.h>
 #include <string.h>
 #include <driver/i2c.h>
+#include <hal/spi_types.h>
+#include <driver/spi_common.h>
+#include <driver/spi_master.h>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -308,44 +311,34 @@ oled_task (void *p)
    }
 }
 
-void
-oled_start (int8_t port, uint8_t address, int8_t scl, int8_t sda, int8_t flip)
+const char*
+oled_start (int8_t port, uint8_t address,int8_t cs,int8_t clk,int8_t din,int8_t dc,int8_t rst,int8_t flip)
 {                               // Start OLED task and display
-   if (scl < 0 || sda < 0 || port < 0)
-      return;
+	if(din<0)return "DIN?";
+	if(clk<0)return "CLK?";
+	if(dc<0)return "DC?";
+	if(cs<0)return "CS?";
+	if(port!=SPI2_HOST&&port!=SPI3_HOST)return "Bad port";
    oled_mutex = xSemaphoreCreateMutex ();       // Shared text access
    oled = malloc (OLEDSIZE);
    if (!oled)
-      return;
+      return "Mem?";
    memset (oled, 0, OLEDSIZE);
    oled_flip = flip;
    oled_port = port;
    oled_address = address;
-   if (i2c_driver_install (oled_port, I2C_MODE_MASTER, 0, 0, 0))
-   {
-      ESP_LOGE (TAG, "I2C config fail");
-      oled_port = -1;
-      free (oled);
-      oled = NULL;
-   } else
-   {
-      i2c_config_t config = {
-         .mode = I2C_MODE_MASTER,
-         .sda_io_num = sda,
-         .scl_io_num = scl,
-         .sda_pullup_en = true,
-         .scl_pullup_en = true,
-         .master.clk_speed = 100000,
-      };
-      if (i2c_param_config (oled_port, &config))
-      {
-         i2c_driver_delete (oled_port);
-         ESP_LOGE (TAG, "I2C config fail");
-         oled_port = -1;
-      } else
-         i2c_set_timeout (oled_port, 160000);   // 2ms? allow for clock stretching
-   }
+   spi_bus_config_t config={
+	   .mosi_io_num=din,
+	   .miso_io_num=-1,
+	   .sclk_io_num=clk,
+	   .quadwp_io_num=-1,
+	   .quadhd_io_num=-1,
+	   .flags=SPICOMMON_BUSFLAG_MASTER|SPICOMMON_BUSFLAG_IOMUX_PINS
+   };
+   if(spi_bus_initialize(port, &config, 1))return "Init?";
+
    xTaskCreate (oled_task, "OLED", 8 * 1024, NULL, 2, &oled_task_id);
+   return NULL;
 }
 
 void
