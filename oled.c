@@ -119,7 +119,7 @@ oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
 {                               /* Set position */
    x = newx;
    y = newy;
-   a = newa;
+   a = newa?:(OLED_L|OLED_T|OLED_H);
 }
 
 void
@@ -189,9 +189,9 @@ oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
    else if (a & OLED_R)
       l -= (w - 1);
    if ((a & OLED_M) == OLED_M)
-      t += (h - 1) / 2;
+      t -= (h - 1) / 2;
    else if (a & OLED_B)
-      t += (h - 1);
+      t -= (h - 1);
    if (a & OLED_H)
    {
       if (a & OLED_L)

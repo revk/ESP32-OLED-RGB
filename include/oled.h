@@ -27,7 +27,7 @@ void oled_set_contrast(oled_intensity_t);
 
 /* Drawing functions - do a lock first */
 /* State setting */
-void oled_pos(oled_pos_t x,oled_pos_t y,oled_align_t);	/* Set position */
+void oled_pos(oled_pos_t x,oled_pos_t y,oled_align_t);	/* Set position, not y=0 is TOP of display */
 void oled_colour(oled_colour_t);	/* Set foreground */
 void oled_background(oled_colour_t);	/* Set background */
 
