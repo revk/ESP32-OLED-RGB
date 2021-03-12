@@ -180,7 +180,7 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 }
 
 static void
-oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
+oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t wm, oled_pos_t hm, oled_pos_t * xp, oled_pos_t * yp)
 {                               /* move x/y based on drawing a box w/h, set x/y as top left of said box */
    oled_pos_t      l = x,
                    t = y;
@@ -195,16 +195,16 @@ oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
    if (a & OLED_H)
    {
       if (a & OLED_L)
-         x += w;
+         x += w + wm;
       if (a & OLED_R)
-         x -= w;
+         x -= w + wm;
    }
    if (a & OLED_V)
    {
       if (a & OLED_T)
-         y += h;
+         y += h + hm;
       if (a & OLED_B)
-         y -= h;
+         y -= h + hm;
    }
    if (xp)
       *xp = l;
@@ -257,7 +257,7 @@ oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
 {                               /* draw a box, not filled */
    oled_pos_t      x,
                    y;
-   oled_draw(w, h, &x, &y);
+   oled_draw(w, h, 0, 0, &x, &y);
    for (oled_pos_t n = 0; n < w; n++)
    {
       oled_pixel(x + n, y, i);
@@ -275,7 +275,7 @@ oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
 {                               /* draw a filled rectangle */
    oled_pos_t      x,
                    y;
-   oled_draw(w, h, &x, &y);
+   oled_draw(w, h, 0, 0, &x, &y);
    for (oled_pos_t row = 0; row < h; row++)
       for (oled_pos_t col = 0; col < w; col++)
          oled_pixel(x + col, y + row, i);
@@ -290,7 +290,7 @@ oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
    {
       oled_pos_t      x,
                       y;
-      oled_draw(w, h, &x, &y);
+      oled_draw(w, h, 0, 0, &x, &y);
       oled_block16(x, y, w, h, data, 0);
    }
 }
@@ -347,7 +347,10 @@ oled_text(int8_t size, const char *fmt,...)
       w += cwidth(*p);
    oled_pos_t      x,
                    y;
-   oled_draw(w, h, &x, &y);     /* starting point */
+   if (w)
+      w -= (size ? : 1);
+   //Margin right hand pixel needs removing from width
+      oled_draw(w, h, size ? : 1, size ? : 1, &x, &y);  /* starting point */
    for (char *p = temp; *p; p++)
    {
       int             c = *p;
@@ -468,6 +471,7 @@ oled_task(void *p)
       e += oled_cmd1(0xBB, 0x17);       /* pre-charge voltage */
       e += oled_cmd1(0xB6, 0x01);       /* pre-charge period */
       e += oled_cmd1(0xBE, 0x05);       /* COM deselect voltage */
+      e += oled_cmd1(0xFD, 0xB0);       /* lock */
       oled_unlock();
       if (!e)
          break;
