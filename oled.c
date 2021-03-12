@@ -119,7 +119,7 @@ oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
 {                               /* Set position */
    x = newx;
    y = newy;
-   a = newa ? : (OLED_L | OLED_T | OLED_H);
+   a = (newa ? : (OLED_L | OLED_T | OLED_H));
 }
 
 void
