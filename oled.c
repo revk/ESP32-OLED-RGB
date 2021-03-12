@@ -119,7 +119,7 @@ oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
 {                               /* Set position */
    x = newx;
    y = newy;
-   a = newa?:(OLED_L|OLED_T|OLED_H);
+   a = newa ? : (OLED_L | OLED_T | OLED_H);
 }
 
 void
@@ -284,10 +284,15 @@ oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
 void
 oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
 {                               /* Icon, 16 bit packed */
-   oled_pos_t      x,
-                   y;
-   oled_draw(w, h, &x, &y);
-   oled_block16(x, y, w, h, data, 0);
+   if (!data)
+      oled_fill(w, h, 0);       /* No icon */
+   else
+   {
+      oled_pos_t      x,
+                      y;
+      oled_draw(w, h, &x, &y);
+      oled_block16(x, y, w, h, data, 0);
+   }
 }
 
 void
@@ -325,12 +330,20 @@ oled_text(int8_t size, const char *fmt,...)
       {
          if (c < ' ')
             return c * size;
-         if (c == ':' || c == ':')
+         if (c == ':' || c == '.')
             return size * 2;
       }
                       return fontw;
    }
-   for (char *p = temp; *p; p++)
+   uint8_t        *fontdata(char c)
+   {
+      uint8_t        *d = fonts[size] + (c - ' ') * fonth * fontw / 2;
+      if              (c == ':' || c == '.')
+                         d += size;
+                    //2 pixels in
+                      return d;
+   }
+   for             (char *p = temp; *p; p++)
       w += cwidth(*p);
    oled_pos_t      x,
                    y;
@@ -343,7 +356,7 @@ oled_text(int8_t size, const char *fmt,...)
       {
          if (c < ' ')
             c = ' ';
-         oled_block16(x, y, charw, h, fonts[size] + (c - ' ') * fonth * fontw / 2, fontw / 2);
+         oled_block16(x, y, charw, h, fontdata(c), fontw / 2);
          x += charw;
       }
    }
