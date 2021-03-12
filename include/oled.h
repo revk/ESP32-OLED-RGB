@@ -19,7 +19,7 @@ typedef	uint8_t oled_align_t;
 const char*oled_start (int8_t port, int8_t cs,int8_t clk,int8_t din,int8_t dc,int8_t rst,int8_t flip);
 
 /* locking atomic drawing functions */
-void oled_lock(void);	/* sets default state to 0, 0, left, bottom, horizontal, white on black */
+void oled_lock(void);	/* sets default state to 0, 0, left, top, horizontal, white on black */
 void oled_unlock(void);
 
 /* Overall display contrast setting */

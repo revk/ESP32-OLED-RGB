@@ -18,6 +18,7 @@
 static const char TAG[] = "OLED";
 
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <string.h>
 #include <hal/spi_types.h>
 #include <driver/spi_common.h>
@@ -173,7 +174,7 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 #if CONFIG_OLED_BPP <= 8
 #error	Not coded greyscale yet
 #else
-   oled[(y * CONFIG_OLED_WIDTH) + x] = f * (i >> ISHIFT) + b * ((~i) >> ISHIFT);
+   oled[(y * CONFIG_OLED_WIDTH) + x] = ntohs(f * (i >> ISHIFT) + b * ((~i) >> ISHIFT));
 #endif
 }
 
@@ -181,11 +182,53 @@ static void
 oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
 {                               /* move x/y based on drawing a box w/h, set x/y as top left of said box */
 
-   /* TODO */
+   oled_pos_t      l = x,
+                   t = y;
+   if ((a & OLED_C) == OLED_C)
+      l -= (w - 1) / 2;
+   else if (a & OLED_R)
+      l -= (w - 1);
+   if ((a & OLED_M) == OLED_M)
+      t += (h - 1) / 2;
+   else if (a & OLED_B)
+      t += (h - 1);
+   if (a & OLED_H)
+   {
+      if (a & OLED_L)
+         x += w;
+      if (a & OLED_R)
+         x -= w;
+   }
+   if (a & OLED_V)
+   {
+      if (a & OLED_T)
+         y += h;
+      if (a & OLED_B)
+         y -= h;
+   }
    if (*xp)
-      *xp = x;
+      *xp = l;
    if (*yp)
-      *yp = y;
+      *yp = t;
+}
+
+static void
+oled_block16(oled_pos_t x, oled_pos_t y, oled_pos_t w, oled_pos_t h, const uint8_t * data, int l)
+{                               /* Draw a block from 16 bit greyscale data, l is data width for each row */
+   if (!l)
+      l = (w + 1) / 2;          /* default is pixels width */
+   for (oled_pos_t row = 0; row < h; row++)
+   {
+      for (oled_pos_t col = 0; col < w; col++)
+      {
+         uint8_t         v = data[col / 2];
+         oled_pixel(x + col, y + row, (v & 0xF0) | (v >> 4));
+         col++;
+         if (col < w)
+            oled_pixel(x + col, y + row, (v & 0xF) | (v << 4));
+      }
+      data += l;
+   }
 }
 
 /* drawing */
@@ -233,15 +276,18 @@ oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
    oled_pos_t      x,
                    y;
    oled_draw(w, h, &x, &y);
-   for (oled_pos_t v = 0; v < h; v++)
-      for (oled_pos_t h = 0; h < w; h++)
-         oled_pixel(x + h, y + v, i);
+   for (oled_pos_t row = 0; row < h; row++)
+      for (oled_pos_t col = 0; col < w; col++)
+         oled_pixel(x + col, y + row, i);
 }
 
 void
 oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
 {                               /* Icon, 16 bit packed */
-   /* TODO */
+   oled_pos_t      x,
+                   y;
+   oled_draw(w, h, &x, &y);
+   oled_block16(x, y, w, h, data, 0);
 }
 
 void
@@ -251,14 +297,13 @@ oled_text(int8_t size, const char *fmt,...)
       return;
    oled_changed = 1;            /* TODO */
    va_list         ap;
-   char            temp[CONFIG_OLED_WIDTH / 4 + 2],
-                  *t = temp;
+   char            temp[CONFIG_OLED_WIDTH / 4 + 2];
    va_start(ap, fmt);
    vsnprintf(temp, sizeof(temp), fmt, ap);
    va_end(ap);
-   int             z = 7;
+   int             z = 7;       /* effective height */
    if (size < 0)
-   {
+   {                            /* indicates descenders allowed */
       size = -size;
       z = 9;
    } else if (!size)
@@ -267,33 +312,40 @@ oled_text(int8_t size, const char *fmt,...)
       size = sizeof(fonts) / sizeof(*fonts);
    if (!fonts[size])
       return;
-   int             w = (size ? 6 * size : 4);
-   int             h = (size ? 9 * size : 5);
-   y -= size * 2;               /* Baseline */
-   while (*t)
+   int             fontw = (size ? 6 * size : 4);       /* pixel width of characters in font file */
+   int             fonth = (size ? 9 * size : 5);       /* pixel height of characters in font file */
+
+   int             w = 0;       /* width of overall text */
+   int             h = z * (size ? : 1);        /* height of overall text */
+   int             cwidth(char c)
+   {                            /* character width as printed - some characters are done narrow, and <' ' is fixed size move */
+      if (c & 0x80)
+         return 0;
+      if (size)
+      {
+         if (c < ' ')
+            return c * size;
+         if (c == ':' || c == ':')
+            return size * 2;
+      }
+                      return fontw;
+   }
+   for (char *p = temp; *p; p++)
+      w += cwidth(*p);
+   oled_pos_t      x,
+                   y;
+   oled_draw(w, h, &x, &y);     /* starting point */
+   for (char *p = temp; *p; p++)
    {
-      int             c = *t++;
-      if (c >= 0x7F)
-         continue;
-      int             ww = w;
-      if (c < ' ')
-      {                         /* Sub space */
-         if (size)
-            ww = size * c;
-         c = ' ';
-      }
-      const uint8_t  *base = fonts[size] + (c - ' ') * h * w * CONFIG_OLED_BPP / 8;
-      if (size && (c == '.' || c == ':'))
+      int             c = *p;
+      int             charw = cwidth(c);
+      if (charw)
       {
-         ww = size * 2;
-         base += size * 2 * CONFIG_OLED_BPP / 8;
-      }                         /* Special case for. */
-      for (int dy = 0; dy < (size ? : 1) * z; dy++)
-      {
-         /* oled_copy(x, y + h - 1 - dy, base, ww); */
-         base += w * CONFIG_OLED_BPP / 8;
+         if (c < ' ')
+            c = ' ';
+         oled_block16(x, y, charw, h, fonts[size] + (c - ' ') * fonth * fontw / 2, fontw / 2);
+         x += charw;
       }
-      x += ww;
    }
 }
 
@@ -387,7 +439,7 @@ oled_task(void *p)
       usleep(10000);
       /* Many of these are setting as defaults, just to be sure */
       e += oled_cmd(0xA5);      /* white */
-      e += oled_cmd1(0xA0, oled_flip ? 0x32 : 0x20);    /* flip and colour mode */
+      e += oled_cmd1(0xA0, oled_flip ? 0x34 : 0x26);    /* flip and colour mode */
       e += oled_cmd1(0xFD, 0x12);       /* unlock */
       e += oled_cmd1(0xFD, 0xB1);       /* unlock */
       e += oled_cmd1(0xB3, 0xF1);       /* Frequency */
@@ -504,7 +556,7 @@ oled_lock(void)
    x = y = 0;
    b = BLACK;
    f = WHITE;
-   a = OLED_L | OLED_B | OLED_H;
+   a = OLED_L | OLED_T | OLED_H;
 }
 
 void
