@@ -101,6 +101,7 @@ static int8_t   oled_port = 0;
 static int8_t   oled_flip = 0;
 static int8_t   oled_dc = -1;
 static int8_t   oled_rst = -1;
+static int8_t   oled_locks = 0;
 static spi_device_handle_t oled_spi;
 static volatile uint8_t oled_changed = 1;
 static volatile uint8_t oled_update = 0;
@@ -181,7 +182,6 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 static void
 oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
 {                               /* move x/y based on drawing a box w/h, set x/y as top left of said box */
-
    oled_pos_t      l = x,
                    t = y;
    if ((a & OLED_C) == OLED_C)
@@ -206,9 +206,9 @@ oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
       if (a & OLED_B)
          y -= h;
    }
-   if (*xp)
+   if (xp)
       *xp = l;
-   if (*yp)
+   if (yp)
       *yp = t;
 }
 
@@ -335,9 +335,9 @@ oled_text(int8_t size, const char *fmt,...)
       }
                       return fontw;
    }
-   uint8_t        *fontdata(char c)
+   const uint8_t  *fontdata(char c)
    {
-      uint8_t        *d = fonts[size] + (c - ' ') * fonth * fontw / 2;
+      const uint8_t  *d = fonts[size] + (c - ' ') * fonth * fontw / 2;
       if              (c == ':' || c == '.')
                          d += size;
                     //2 pixels in
@@ -565,6 +565,9 @@ oled_lock(void)
 {                               /* Lock display task */
    if (oled_mutex)
       xSemaphoreTake(oled_mutex, portMAX_DELAY);
+   oled_locks++;
+   if (oled_locks != 1)
+      ESP_LOGE(TAG, "Locks %d", oled_locks);
    /* preset state */
    x = y = 0;
    b = BLACK;
@@ -575,6 +578,9 @@ oled_lock(void)
 void
 oled_unlock(void)
 {                               /* Unlock display task */
+   if (oled_locks != 1)
+      ESP_LOGE(TAG, "Locks %d", oled_locks);
+   oled_locks--;
    if (oled_mutex)
       xSemaphoreGive(oled_mutex);
 }
