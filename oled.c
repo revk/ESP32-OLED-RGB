@@ -1,15 +1,31 @@
-// Simple OLED display and text logic
-// Copyright Â© 2019 Adrian Kennard Andrews & Arnold Ltd
+/*
+ * Simple OLED display and text logic Copyright ©2019-21 Adrian Kennard, Andrews & Arnold Ltd This code handles SPI to an SSD1351
+ * controller, but can easily be adapted to others
+ * 
+ * The drawing functions all text and some basic graphics Always use oled_lock() and oled_unlock() around drawing, this ensures they
+ * are atomically updated to the physical display, and allows the drawing state to be held without clashes with other tasks.
+ * 
+ * The drawing state includes:- - Position of cursor - Foreground and background colour - Alignment of that position in next drawn
+ * object - Movement after drawing (horizontal or vertical)
+ * 
+ * Pixels are set to an "intensity" (0-255) to which a current foreground and background colour is applied. In practice this may be
+ * fewer bits, e.g. on SDD1351 only top 4 bits of intensity are used, multiplied by the selected colour to make a 16 bit RGB For a
+ * mono display the intensity directly relates to the grey scale used.
+ * 
+ * Functions are described in the include file.
+ * 
+ */
 static const char TAG[] = "OLED";
 
 #include <unistd.h>
 #include <string.h>
-#include <driver/i2c.h>
 #include <hal/spi_types.h>
 #include <driver/spi_common.h>
 #include <driver/spi_master.h>
+#include <driver/gpio.h>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "oled.h"
 
@@ -65,292 +81,435 @@ static uint8_t const *fonts[] = {
 #endif
 };
 
+#if CONFIG_OLED_BPP>16
+typedef uint32_t oled_cell_t;
+#define OLEDSIZE (CONFIG_OLED_WIDTH * CONFIG_OLED_HEIGHT * sizeof(oled_cell_t))
+#elif CONFIG_OLED_BPP>8
+typedef uint16_t oled_cell_t;
+#define OLEDSIZE (CONFIG_OLED_WIDTH * CONFIG_OLED_HEIGHT * sizeof(oled_cell_t))
+#else
+typedef uint8_t oled_cell_t;
 #define OLEDSIZE (CONFIG_OLED_WIDTH * CONFIG_OLED_HEIGHT * CONFIG_OLED_BPP / 8)
-static uint8_t *oled = NULL;
+#endif
+static oled_cell_t *oled = NULL;
+
+/* general global stuff */
 static TaskHandle_t oled_task_id = NULL;
 static SemaphoreHandle_t oled_mutex = NULL;
-static int8_t oled_port = 0;
-static int8_t oled_address = 0;
-static int8_t oled_flip = 0;
+static int8_t   oled_port = 0;
+static int8_t   oled_flip = 0;
+static int8_t   oled_dc = -1;
+static int8_t   oled_rst = -1;
+static spi_device_handle_t oled_spi;
 static volatile uint8_t oled_changed = 1;
 static volatile uint8_t oled_update = 0;
-static uint8_t oled_contrast = 127;
+static oled_intensity_t oled_contrast = 255;
 
+/* drawing state */
+static oled_pos_t x = 0,
+                y = 0;          /* position */
+static oled_align_t a = 0;      /* alignment and movement */
+static oled_colour_t f = 0,     /* colour */
+                b = 0;
+
+/* state control */
 void
-oled_clear (void)
-{
-   if (!oled)
-      return;
-   memset (oled, 0, OLEDSIZE);
-   oled_changed = 1;
+oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
+{                               /* Set position */
+   x = newx;
+   y = newy;
+   a = newa;
 }
 
 void
-oled_set_contrast (uint8_t contrast)
+oled_colour(oled_colour_t newf)
+{                               /* Set foreground */
+   f = newf;
+}
+
+void
+oled_background(oled_colour_t newb)
+{                               /* Set background */
+   b = newb;
+}
+
+/* State get */
+oled_pos_t
+oled_x(void)
+{
+   return x;
+}
+
+oled_pos_t
+oled_y(void)
+{
+   return y;
+}
+
+oled_align_t
+oled_a(void)
+{
+   return a;
+}
+
+oled_colour_t
+oled_f(void)
+{
+   return f;
+}
+
+oled_colour_t
+oled_b(void)
+{
+   return b;
+}
+
+/* support */
+static inline void
+oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
+{                               /* set a pixel */
+   if (x < 0 || x >= CONFIG_OLED_WIDTH || y < 0 || y >= CONFIG_OLED_HEIGHT)
+      return;                   /* out of display */
+#if CONFIG_OLED_BPP <= 8
+#error	Not coded greyscale yet
+#else
+   oled[(y * CONFIG_OLED_WIDTH) + x] = f * (i >> ISHIFT) + b * ((~i) >> ISHIFT);
+#endif
+}
+
+static void
+oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t * xp, oled_pos_t * yp)
+{                               /* move x/y based on drawing a box w/h, set x/y as top left of said box */
+
+   /* TODO */
+   if (*xp)
+      *xp = x;
+   if (*yp)
+      *yp = y;
+}
+
+/* drawing */
+void
+oled_clear(oled_intensity_t i)
 {
    if (!oled)
       return;
-   oled_lock ();
+   for (oled_pos_t y = 0; y < CONFIG_OLED_HEIGHT; y++)
+      for (oled_pos_t x = 0; x < CONFIG_OLED_WIDTH; x++)
+         oled_pixel(x, y, i);
+}
+
+void
+oled_set_contrast(oled_intensity_t contrast)
+{
+   if (!oled)
+      return;
    oled_contrast = contrast;
-   if (oled_update)
-      oled_update = 1;          // Force sending new contrast
+   oled_update = 1;
    oled_changed = 1;
-   oled_unlock ();
 }
 
 void
-oled_set (int x, int y, int v)
-{
-   if (!oled)
-      return;
-   if (x < 0 || x >= CONFIG_OLED_WIDTH || y < 0 || y >= CONFIG_OLED_HEIGHT)
-      return;
-   uint8_t s = ((8 - CONFIG_OLED_BPP) - CONFIG_OLED_BPP * (x % (8 / CONFIG_OLED_BPP)));
-   uint8_t m = (((1 << CONFIG_OLED_BPP) - 1) << s);
-   uint8_t *p = oled + y * CONFIG_OLED_WIDTH * CONFIG_OLED_BPP / 8 + x * CONFIG_OLED_BPP / 8;
-   *p = (*p & ~m) | ((v << s) & m);
-}
-
-int
-oled_get (int x, int y)
-{
-   if (!oled)
-      return -1;
-   if (x < 0 || x >= CONFIG_OLED_WIDTH || y < 0 || y >= CONFIG_OLED_HEIGHT)
-      return -1;
-   uint8_t s = ((8 - CONFIG_OLED_BPP) - CONFIG_OLED_BPP * (x % (8 / CONFIG_OLED_BPP)));
-   uint8_t m = (((1 << CONFIG_OLED_BPP) - 1) << s);
-   uint8_t *p = oled + y * CONFIG_OLED_WIDTH * CONFIG_OLED_BPP / 8 + x * CONFIG_OLED_BPP / 8;
-   return (*p & m) >> s;
-}
-
-static inline int
-oled_copy (int x, int y, const uint8_t * src, int dx)
-{                               // Copy pixels
-   if (!oled)
-      return 0;
-   x -= x % (8 / CONFIG_OLED_BPP);      // Align to byte
-   dx -= dx % (8 / CONFIG_OLED_BPP);    // Align to byte
-   if (y >= 0 && y < CONFIG_OLED_HEIGHT && x + dx >= 0 && x < CONFIG_OLED_WIDTH)
-   {                            // Fits
-      int pix = dx;
-      if (x < 0)
-      {                         // Truncate left
-         pix += x;
-         x = 0;
-      }
-      if (x + pix > CONFIG_OLED_WIDTH)
-         pix = CONFIG_OLED_WIDTH - x;   // Truncate right
-      uint8_t *dst = oled + y * CONFIG_OLED_WIDTH * CONFIG_OLED_BPP / 8 + x * CONFIG_OLED_BPP / 8;
-      if (src)
-      {                         // Copy
-         if (memcmp (dst, src, pix * CONFIG_OLED_BPP / 8))
-         {                      // Changed
-            memcpy (dst, src, pix * CONFIG_OLED_BPP / 8);
-            oled_changed = 1;
-         }
-      } else
-      {                         // Clear
-         memset (dst, 0, pix * CONFIG_OLED_BPP / 8);
-         oled_changed = 1;
-      }
+oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
+{                               /* draw a box, not filled */
+   oled_pos_t      x,
+                   y;
+   oled_draw(w, h, &x, &y);
+   for (oled_pos_t n = 0; n < w; n++)
+   {
+      oled_pixel(x + n, y, i);
+      oled_pixel(x + n, y + h - 1, i);
    }
-   if (!src)
-      return 0;
-   return dx * CONFIG_OLED_BPP / 8;     // Bytes (would be) copied
+   for (oled_pos_t n = 1; n < w - 1; n++)
+   {
+      oled_pixel(x, y + n, i);
+      oled_pixel(x + w - 1, y + n, i);
+   }
 }
 
-int
-oled_text (int8_t size, int x, int y, const char *fmt, ...)
-{                               // Size negative for descenders
+void
+oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
+{                               /* draw a filled rectangle */
+   oled_pos_t      x,
+                   y;
+   oled_draw(w, h, &x, &y);
+   for (oled_pos_t v = 0; v < h; v++)
+      for (oled_pos_t h = 0; h < w; h++)
+         oled_pixel(x + h, y + v, i);
+}
+
+void
+oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
+{                               /* Icon, 16 bit packed */
+   /* TODO */
+}
+
+void
+oled_text(int8_t size, const char *fmt,...)
+{                               /* Size negative for descenders */
    if (!oled)
-      return 0;
-   va_list ap;
-   char temp[CONFIG_OLED_WIDTH / 4 + 2],
-    *t = temp;
-   va_start (ap, fmt);
-   vsnprintf (temp, sizeof (temp), fmt, ap);
-   va_end (ap);
-   int z = 7;
+      return;
+   oled_changed = 1;            /* TODO */
+   va_list         ap;
+   char            temp[CONFIG_OLED_WIDTH / 4 + 2],
+                  *t = temp;
+   va_start(ap, fmt);
+   vsnprintf(temp, sizeof(temp), fmt, ap);
+   va_end(ap);
+   int             z = 7;
    if (size < 0)
    {
       size = -size;
       z = 9;
    } else if (!size)
       z = 5;
-   if (size > sizeof (fonts) / sizeof (*fonts))
-      size = sizeof (fonts) / sizeof (*fonts);
+   if (size > sizeof(fonts) / sizeof(*fonts))
+      size = sizeof(fonts) / sizeof(*fonts);
    if (!fonts[size])
-      return 0;
-   int w = (size ? 6 * size : 4);
-   int h = (size ? 9 * size : 5);
-   y -= size * 2;               // Baseline
+      return;
+   int             w = (size ? 6 * size : 4);
+   int             h = (size ? 9 * size : 5);
+   y -= size * 2;               /* Baseline */
    while (*t)
    {
-      int c = *t++;
+      int             c = *t++;
       if (c >= 0x7F)
          continue;
-      int ww = w;
+      int             ww = w;
       if (c < ' ')
-      {                         // Sub space
+      {                         /* Sub space */
          if (size)
             ww = size * c;
          c = ' ';
       }
-      const uint8_t *base = fonts[size] + (c - ' ') * h * w * CONFIG_OLED_BPP / 8;
+      const uint8_t  *base = fonts[size] + (c - ' ') * h * w * CONFIG_OLED_BPP / 8;
       if (size && (c == '.' || c == ':'))
       {
          ww = size * 2;
          base += size * 2 * CONFIG_OLED_BPP / 8;
-      }                         // Special case for .
+      }                         /* Special case for. */
       for (int dy = 0; dy < (size ? : 1) * z; dy++)
       {
-         oled_copy (x, y + h - 1 - dy, base, ww);
+         /* oled_copy(x, y + h - 1 - dy, base, ww); */
          base += w * CONFIG_OLED_BPP / 8;
       }
       x += ww;
    }
-   return x;
 }
 
-int
-oled_icon (int x, int y, const void *p, int w, int h)
-{                               // Plot an icon
-   if (!oled)
-      return 0;
-   for (int dy = 0; dy < h; dy++)
-      p += oled_copy (x, y + h - dy - 1, p, w);
-   return x + w;
+static          esp_err_t
+oled_cmd(uint8_t cmd)
+{                               /* Send command */
+   gpio_set_level(oled_dc, 0);
+   spi_transaction_t t = {
+      .length = 8,
+      .tx_data = {cmd},
+      .flags = SPI_TRANS_USE_TXDATA,
+   };
+   esp_err_t       e = spi_device_polling_transmit(oled_spi, &t);
+   return e;
+}
+
+static          esp_err_t
+oled_data(int len, void *data)
+{                               /* Send data */
+   gpio_set_level(oled_dc, 1);
+   spi_transaction_t c = {
+      .length = 8 * len,
+      .tx_buffer = data,
+   };
+   return spi_device_transmit(oled_spi, &c);
+}
+
+static          esp_err_t
+oled_cmd1(uint8_t cmd, uint8_t a)
+{                               /* Send a command with an arg */
+   esp_err_t       e = oled_cmd(cmd);
+   if (e)
+      return e;
+   gpio_set_level(oled_dc, 1);
+   spi_transaction_t d = {
+      .length = 8,
+      .tx_data = {a},
+      .flags = SPI_TRANS_USE_TXDATA,
+   };
+   return spi_device_polling_transmit(oled_spi, &d);
+}
+
+static          esp_err_t
+oled_cmd2(uint8_t cmd, uint8_t a, uint8_t b)
+{                               /* Send a command with args */
+   esp_err_t       e = oled_cmd(cmd);
+   if (e)
+      return e;
+   gpio_set_level(oled_dc, 1);
+   spi_transaction_t d = {
+      .length = 16,
+      .tx_data = {a, b},
+      .flags = SPI_TRANS_USE_TXDATA,
+   };
+   return spi_device_polling_transmit(oled_spi, &d);
+}
+
+static          esp_err_t
+oled_cmd3(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c)
+{                               /* Send a command with args */
+   esp_err_t       e = oled_cmd(cmd);
+   if (e)
+      return e;
+   gpio_set_level(oled_dc, 1);
+   spi_transaction_t d = {
+      .length = 24,
+      .tx_data = {a, b, c},
+      .flags = SPI_TRANS_USE_TXDATA,
+   };
+   return spi_device_polling_transmit(oled_spi, &d);
 }
 
 static void
-oled_task (void *p)
+oled_task(void *p)
 {
-   int try = 10;
-   esp_err_t e = 0;
+   int             try = 10;
+   esp_err_t       e = 0;
+   usleep(300000);              /* 300ms to start up */
    while (try--)
    {
-      oled_lock ();
-      i2c_cmd_handle_t t = i2c_cmd_link_create ();
-      i2c_master_start (t);
-      i2c_master_write_byte (t, (oled_address << 1) | I2C_MASTER_WRITE, true);
-      i2c_master_write_byte (t, 0x00, true);    // Cmds
-      i2c_master_write_byte (t, 0xA5, true);    // White
-      i2c_master_write_byte (t, 0xAF, true);    // On
-      i2c_master_write_byte (t, 0xA0, true);    // Remap
-      i2c_master_write_byte (t, oled_flip ? 0x52 : 0x41, true); // Match display
-      i2c_master_stop (t);
-      e = i2c_master_cmd_begin (oled_port, t, 10 / portTICK_PERIOD_MS);
-      i2c_cmd_link_delete (t);
-      oled_unlock ();
+      oled_lock();
+      if (oled_rst >= 0)
+      {
+         /* Reset */
+         gpio_set_level(oled_rst, 0);
+         usleep(1000);
+         gpio_set_level(oled_rst, 1);
+         usleep(1000);
+      }
+      e = oled_cmd(0xAF);       /* start */
+      usleep(10000);
+      /* Many of these are setting as defaults, just to be sure */
+      e += oled_cmd(0xA5);      /* white */
+      e += oled_cmd1(0xA0, oled_flip ? 0x32 : 0x20);    /* flip and colour mode */
+      e += oled_cmd1(0xFD, 0x12);       /* unlock */
+      e += oled_cmd1(0xFD, 0xB1);       /* unlock */
+      e += oled_cmd1(0xB3, 0xF1);       /* Frequency */
+      e += oled_cmd1(0xCA, 0x7F);       /* MUX */
+      e += oled_cmd1(0xA1, 0x00);       /* Start 0 */
+      e += oled_cmd1(0xA2, 0x00);       /* Offset 0 */
+      e += oled_cmd1(0xAB, 0x01);       /* Regulator */
+      e += oled_cmd3(0xB4, 0xA0, 0xB5, 0x55);   /* VSL */
+      e += oled_cmd3(0xC1, 0xC8, 0x80, 0xC0);   /* Contrast */
+      e += oled_cmd1(0xC7, 0x0F);       /* current */
+      e += oled_cmd1(0xB1, 0x32);       /* clocks */
+      e += oled_cmd3(0xB2, 0xA4, 0x00, 0x00);   /* enhance */
+      e += oled_cmd1(0xBB, 0x17);       /* pre-charge voltage */
+      e += oled_cmd1(0xB6, 0x01);       /* pre-charge period */
+      e += oled_cmd1(0xBE, 0x05);       /* COM deselect voltage */
+      oled_unlock();
       if (!e)
          break;
-      sleep (1);
+      sleep(1);
    }
    if (e)
    {
-      ESP_LOGE (TAG, "Configuration failed %s", esp_err_to_name (e));
-      free (oled);
+      ESP_LOGE(TAG, "Configuration failed %s", esp_err_to_name(e));
+      free(oled);
       oled = NULL;
       oled_port = -1;
-      vTaskDelete (NULL);
+      vTaskDelete(NULL);
       return;
    }
-
+   oled_update = 1;
    while (1)
-   {                            // Update
+   {                            /* Update */
       if (!oled_changed)
       {
-         usleep (100000);
+         usleep(100000);
          continue;
       }
-      oled_lock ();
+      oled_lock();
       oled_changed = 0;
-      i2c_cmd_handle_t t;
-      e = 0;
-      if (oled_update < 2)
-      {                         // Set up
-         t = i2c_cmd_link_create ();
-         i2c_master_start (t);
-         i2c_master_write_byte (t, (oled_address << 1) | I2C_MASTER_WRITE, true);
-         i2c_master_write_byte (t, 0x00, true); // Cmds
-         if (oled_update)
-            i2c_master_write_byte (t, 0xA4, true);      // Normal mode
-         i2c_master_write_byte (t, 0x81, true); // Contrast
-         i2c_master_write_byte (t, oled_contrast, true);        // Contrast
-         i2c_master_write_byte (t, 0x15, true); // Col
-         i2c_master_write_byte (t, 0x00, true); // 0
-         i2c_master_write_byte (t, 0x7F, true); // 127
-         i2c_master_write_byte (t, 0x75, true); // Row
-         i2c_master_write_byte (t, 0x00, true); // 0
-         i2c_master_write_byte (t, 0x7F, true); // 127
-         i2c_master_stop (t);
-         e = i2c_master_cmd_begin (oled_port, t, 100 / portTICK_PERIOD_MS);
-         i2c_cmd_link_delete (t);
-      }
-      if (!e)
-      {                         // data
-         t = i2c_cmd_link_create ();
-         i2c_master_start (t);
-         i2c_master_write_byte (t, (oled_address << 1) | I2C_MASTER_WRITE, true);
-         i2c_master_write_byte (t, 0x40, true); // Data
-         i2c_master_write (t, oled, OLEDSIZE, true);    // Buffer
-         i2c_master_stop (t);
-         e = i2c_master_cmd_begin (oled_port, t, 100 / portTICK_PERIOD_MS);
-         i2c_cmd_link_delete (t);
-      }
-      if (e)
-         ESP_LOGE (TAG, "Data failed %s", esp_err_to_name (e));
-      if (!oled_update || e)
+      ESP_LOGE(TAG, "Send image");
+      oled_cmd2(0x15, 0, 127);
+      oled_cmd2(0x75, 0, 127);
+      oled_cmd(0x5C);
+      oled_data(OLEDSIZE, (void *)oled);
+      if (oled_update)
       {
-         oled_update = 1;       // Resend data
-         oled_changed = 1;
-      } else
-         oled_update = 2;       // All OK
-      oled_unlock ();
+         oled_update = 0;
+         oled_cmd1(0xC7, oled_contrast >> 4);
+         oled_cmd(0xA6);
+      }
+      oled_unlock();
    }
 }
 
-const char*
-oled_start (int8_t port, uint8_t address,int8_t cs,int8_t clk,int8_t din,int8_t dc,int8_t rst,int8_t flip)
-{                               // Start OLED task and display
-	if(din<0)return "DIN?";
-	if(clk<0)return "CLK?";
-	if(dc<0)return "DC?";
-	if(cs<0)return "CS?";
-	if(port!=SPI2_HOST&&port!=SPI3_HOST)return "Bad port";
-   oled_mutex = xSemaphoreCreateMutex ();       // Shared text access
-   oled = malloc (OLEDSIZE);
+const char     *
+oled_start(int8_t port, int8_t cs, int8_t clk, int8_t din, int8_t dc, int8_t rst, int8_t flip)
+{                               /* Start OLED task and display */
+   if (din < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(din))
+      return "DIN?";
+   if (clk < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(clk))
+      return "CLK?";
+   if (dc < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(dc))
+      return "DC?";
+   if (cs < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(cs))
+      return "CS?";
+   if (port != SPI2_HOST && port != SPI3_HOST)
+      return "Bad port";
+   if (rst >= 0 && !GPIO_IS_VALID_OUTPUT_GPIO(rst))
+      return "RST?";
+   oled_mutex = xSemaphoreCreateMutex();        /* Shared text access */
+   oled = malloc(OLEDSIZE);
    if (!oled)
       return "Mem?";
-   memset (oled, 0, OLEDSIZE);
+   memset(oled, 0, OLEDSIZE);
    oled_flip = flip;
    oled_port = port;
-   oled_address = address;
-   spi_bus_config_t config={
-	   .mosi_io_num=din,
-	   .miso_io_num=-1,
-	   .sclk_io_num=clk,
-	   .quadwp_io_num=-1,
-	   .quadhd_io_num=-1,
-	   .flags=SPICOMMON_BUSFLAG_MASTER|SPICOMMON_BUSFLAG_IOMUX_PINS
+   oled_dc = dc;
+   oled_rst = rst;
+   spi_bus_config_t config = {
+      .mosi_io_num = din,
+      .miso_io_num = -1,
+      .sclk_io_num = clk,
+      .quadwp_io_num = -1,
+      .quadhd_io_num = -1,
+      .max_transfer_sz = 8 * (OLEDSIZE + 8),
+      .flags = SPICOMMON_BUSFLAG_MASTER,
    };
-   if(spi_bus_initialize(port, &config, 1))return "Init?";
-
-   xTaskCreate (oled_task, "OLED", 8 * 1024, NULL, 2, &oled_task_id);
+   if (port == HSPI_HOST && din == 22 && clk == 18 && cs == 5)
+      config.flags |= SPICOMMON_BUSFLAG_IOMUX_PINS;
+   if (spi_bus_initialize(port, &config, 2))
+      return "Init?";
+   spi_device_interface_config_t devcfg =
+   {
+      .clock_speed_hz = SPI_MASTER_FREQ_20M | SPI_DEVICE_3WIRE,
+      .mode = 0,
+      .spics_io_num = cs,
+      .queue_size = 1,
+   };
+   if (spi_bus_add_device(port, &devcfg, &oled_spi))
+      return "Add?";
+   gpio_set_direction(dc, GPIO_MODE_OUTPUT);
+   if (rst >= 0)
+      gpio_set_direction(rst, GPIO_MODE_OUTPUT);
+   xTaskCreate(oled_task, "OLED", 8 * 1024, NULL, 2, &oled_task_id);
    return NULL;
 }
 
 void
-oled_lock (void)
-{                               // Lock display task
+oled_lock(void)
+{                               /* Lock display task */
    if (oled_mutex)
-      xSemaphoreTake (oled_mutex, portMAX_DELAY);
+      xSemaphoreTake(oled_mutex, portMAX_DELAY);
+   /* preset state */
+   x = y = 0;
+   b = BLACK;
+   f = WHITE;
+   a = OLED_L | OLED_B | OLED_H;
 }
 
 void
-oled_unlock (void)
-{                               // Unlock display task
+oled_unlock(void)
+{                               /* Unlock display task */
    if (oled_mutex)
-      xSemaphoreGive (oled_mutex);
+      xSemaphoreGive(oled_mutex);
 }
