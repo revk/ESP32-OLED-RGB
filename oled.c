@@ -472,6 +472,11 @@ oled_task(void *p)
       e += oled_cmd1(0xB6, 0x01);       /* pre-charge period */
       e += oled_cmd1(0xBE, 0x05);       /* COM deselect voltage */
       e += oled_cmd1(0xFD, 0xB0);       /* lock */
+      oled_cmd2(0x15, 0, 127);
+      oled_cmd2(0x75, 0, 127);
+      oled_cmd(0x5C);
+      oled_data(OLEDSIZE, (void *)oled);
+      oled_cmd(0xA6);
       oled_unlock();
       if (!e)
          break;
@@ -496,7 +501,6 @@ oled_task(void *p)
       }
       oled_lock();
       oled_changed = 0;
-      ESP_LOGE(TAG, "Send image");
       oled_cmd2(0x15, 0, 127);
       oled_cmd2(0x75, 0, 127);
       oled_cmd(0x5C);
@@ -505,7 +509,6 @@ oled_task(void *p)
       {
          oled_update = 0;
          oled_cmd1(0xC7, oled_contrast >> 4);
-         oled_cmd(0xA6);
       }
       oled_unlock();
    }
@@ -570,8 +573,6 @@ oled_lock(void)
    if (oled_mutex)
       xSemaphoreTake(oled_mutex, portMAX_DELAY);
    oled_locks++;
-   if (oled_locks != 1)
-      ESP_LOGE(TAG, "Locks %d", oled_locks);
    /* preset state */
    x = y = 0;
    b = BLACK;
@@ -582,8 +583,6 @@ oled_lock(void)
 void
 oled_unlock(void)
 {                               /* Unlock display task */
-   if (oled_locks != 1)
-      ESP_LOGE(TAG, "Locks %d", oled_locks);
    oled_locks--;
    if (oled_mutex)
       xSemaphoreGive(oled_mutex);
