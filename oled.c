@@ -237,7 +237,7 @@ oled_b(void)
 }
 
 /* support */
-static inline void
+inline void
 oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 {                               /* set a pixel */
    if (x < 0 || x >= CONFIG_OLED_WIDTH || y < 0 || y >= CONFIG_OLED_HEIGHT)
@@ -245,7 +245,7 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 #if CONFIG_OLED_BPP <= 8
 #error	Not coded greyscale yet
 #else
-   oled[(y * CONFIG_OLED_WIDTH) + x] = ntohs(f * (i >> ISHIFT) + b * ((~i) >> ISHIFT));
+   oled[(y * CONFIG_OLED_WIDTH) + x] = ntohs(f_mul * (i >> ISHIFT) + b_mul * ((~i) >> ISHIFT));
 #endif
 }
 

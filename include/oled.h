@@ -38,6 +38,7 @@ char oled_f(void);
 char oled_b(void);
 
 /* Drawing */
+void oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i); /* set pixel directly */
 void oled_clear(oled_intensity_t);	/* clear whole display to current colour (intensity 0 means background colour) */
 void oled_box(oled_pos_t w,oled_pos_t h,oled_intensity_t); /* draw a box, not filled */
 void oled_fill(oled_pos_t w,oled_pos_t h,oled_intensity_t); /* draw a filled rectangle */
