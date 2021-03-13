@@ -161,7 +161,7 @@ oled_colour_lookup(char c)
 #if CONFIG_OLED_BPP == 16
    case 'r':
       return (RED >> 1);
-   case 'E':
+   case 'R':
       return RED;
    case 'g':
       return (GREEN >> 1);
