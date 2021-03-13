@@ -245,7 +245,12 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 #if CONFIG_OLED_BPP <= 8
 #error	Not coded greyscale yet
 #else
-   oled[(y * CONFIG_OLED_WIDTH) + x] = ntohs(f_mul * (i >> ISHIFT) + b_mul * ((~i) >> ISHIFT));
+   uint16_t        v = ntohs(f_mul * (i >> ISHIFT) + b_mul * ((0xFF ^ i) >> ISHIFT));
+   if (v != oled[(y * CONFIG_OLED_WIDTH) + x])
+   {
+      oled[(y * CONFIG_OLED_WIDTH) + x] = v;
+      oled_changed = 1;
+   }
 #endif
 }
 
@@ -370,7 +375,6 @@ oled_text(int8_t size, const char *fmt,...)
 {                               /* Size negative for descenders */
    if (!oled)
       return;
-   oled_changed = 1;            /* TODO */
    va_list         ap;
    char            temp[CONFIG_OLED_WIDTH / 4 + 2];
    va_start(ap, fmt);
@@ -418,9 +422,18 @@ oled_text(int8_t size, const char *fmt,...)
    oled_pos_t      x,
                    y;
    if (w)
-      w -= (size ? : 1);
-   //Margin right hand pixel needs removing from width
-      oled_draw(w, h, size ? : 1, size ? : 1, &x, &y);  /* starting point */
+      w -= (size ? : 1);        /* Margin right hand pixel needs removing from width */
+   oled_draw(w, h, size ? : 1, size ? : 1, &x, &y);     /* starting point */
+   for (oled_pos_t n = -1; n <= w; n++)
+   {
+      oled_pixel(x + n, y - 1, 0);
+      oled_pixel(x + n, y + h, 0);
+   }
+   for (oled_pos_t n = 0; n < w; n++)
+   {
+      oled_pixel(x - 1, y + n, 0);
+      oled_pixel(x + w, y + n, 0);
+   }
    for (char *p = temp; *p; p++)
    {
       int             c = *p;
@@ -429,6 +442,8 @@ oled_text(int8_t size, const char *fmt,...)
       {
          if (c < ' ')
             c = ' ';
+         if (!p[1])
+            charw -= (size ? : 1);
          oled_block16(x, y, charw, h, fontdata(c), fontw / 2);
          x += charw;
       }
