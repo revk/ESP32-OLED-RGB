@@ -543,10 +543,11 @@ oled_task(void *p)
       e += oled_cmd1(0xA0, oled_flip ? 0x34 : 0x26);    /* flip and colour mode */
       e += oled_cmd1(0xFD, 0x12);       /* unlock */
       e += oled_cmd1(0xFD, 0xB1);       /* unlock */
-      e += oled_cmd1(0xB3, 0xF1);       /* Frequency */
-      e += oled_cmd1(0xCA, 0x7F);       /* MUX */
       e += oled_cmd1(0xA1, 0x00);       /* Start 0 */
       e += oled_cmd1(0xA2, 0x00);       /* Offset 0 */
+#if 0
+      e += oled_cmd1(0xB3, 0xF1);       /* Frequency */
+      e += oled_cmd1(0xCA, 0x7F);       /* MUX */
       e += oled_cmd1(0xAB, 0x01);       /* Regulator */
       e += oled_cmd3(0xB4, 0xA0, 0xB5, 0x55);   /* VSL */
       e += oled_cmd3(0xC1, 0xC8, 0x80, 0xC0);   /* Contrast */
@@ -556,6 +557,7 @@ oled_task(void *p)
       e += oled_cmd1(0xBB, 0x17);       /* pre-charge voltage */
       e += oled_cmd1(0xB6, 0x01);       /* pre-charge period */
       e += oled_cmd1(0xBE, 0x05);       /* COM deselect voltage */
+#endif
       e += oled_cmd1(0xFD, 0xB0);       /* lock */
       oled_cmd2(0x15, 0, 127);
       oled_cmd2(0x75, 0, 127);
