@@ -82,6 +82,31 @@ static uint8_t const *fonts[] = {
 #endif
 };
 
+#define	BLACK	0
+#if CONFIG_OLED_BPP == 16
+/* RGB */
+#define ISHIFT  4               /* 4 bits per colour intensity */
+#define R       (1<<11)
+#define G       (1<<5)
+#define B       (1)
+
+#define RED     (R+R)
+#define GREEN   (G+G+G+G)
+#define BLUE    (B+B)
+
+#define CYAN    (GREEN+BLUE)
+#define MAGENTA (RED+BLUE)
+#define YELLOW  (RED+GREEN)
+
+#define WHITE   (RED+GREEN+BLUE)
+
+#elif CONFIG_OLED_BPP <= 8
+/* Grey */
+#define WHITE   1
+#define ISHIFT  (8-CONFIG_OLED_BPP)
+
+#endif
+
 #if CONFIG_OLED_BPP>16
 typedef uint32_t oled_cell_t;
 #define OLEDSIZE (CONFIG_OLED_WIDTH * CONFIG_OLED_HEIGHT * sizeof(oled_cell_t))
@@ -111,8 +136,10 @@ static oled_intensity_t oled_contrast = 255;
 static oled_pos_t x = 0,
                 y = 0;          /* position */
 static oled_align_t a = 0;      /* alignment and movement */
-static oled_colour_t f = 0,     /* colour */
+static char     f = 0,          /* colour */
                 b = 0;
+static uint32_t f_mul = 0,
+                b_mul = 0;      /* actual f/b colour multiplier */
 
 /* state control */
 void
@@ -123,16 +150,56 @@ oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
    a = (newa ? : (OLED_L | OLED_T | OLED_H));
 }
 
-void
-oled_colour(oled_colour_t newf)
-{                               /* Set foreground */
-   f = newf;
+static          uint32_t
+oled_colour_lookup(char c)
+{                               /* character to colour mapping, default is white */
+   switch (c)
+   {
+   case 'k':
+   case 'K':
+      return BLACK;
+#if CONFIG_OLED_BPP == 16
+   case 'r':
+      return (RED >> 1);
+   case 'E':
+      return RED;
+   case 'g':
+      return (GREEN >> 1);
+   case 'G':
+      return GREEN;
+   case 'b':
+      return (BLUE >> 1);
+   case 'B':
+      return BLUE;
+   case 'c':
+      return (CYAN >> 1);
+   case 'C':
+      return CYAN;
+   case 'm':
+      return (MAGENTA >> 1);
+   case 'M':
+      return MAGENTA;
+   case 'y':
+      return (YELLOW >> 1);
+   case 'Y':
+      return YELLOW;
+   case 'w':
+      return (WHITE >> 1);
+#endif
+   }
+   return WHITE;
 }
 
 void
-oled_background(oled_colour_t newb)
+oled_colour(char newf)
+{                               /* Set foreground */
+   f_mul = oled_colour_lookup(f = newf);
+}
+
+void
+oled_background(char newb)
 {                               /* Set background */
-   b = newb;
+   b_mul = oled_colour_lookup(b = newb);
 }
 
 /* State get */
@@ -154,13 +221,13 @@ oled_a(void)
    return a;
 }
 
-oled_colour_t
+char
 oled_f(void)
 {
    return f;
 }
 
-oled_colour_t
+char
 oled_b(void)
 {
    return b;
@@ -574,10 +641,9 @@ oled_lock(void)
       xSemaphoreTake(oled_mutex, portMAX_DELAY);
    oled_locks++;
    /* preset state */
-   x = y = 0;
-   b = BLACK;
-   f = WHITE;
-   a = OLED_L | OLED_T | OLED_H;
+   oled_background('k');
+   oled_colour('w');
+   oled_pos(0, 0, OLED_L | OLED_T | OLED_H);
 }
 
 void
