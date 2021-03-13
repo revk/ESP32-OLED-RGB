@@ -122,11 +122,11 @@ static oled_cell_t *oled = NULL;
 /* general global stuff */
 static TaskHandle_t oled_task_id = NULL;
 static SemaphoreHandle_t oled_mutex = NULL;
-static int8_t   oled_port = 0;
-static int8_t   oled_flip = 0;
-static int8_t   oled_dc = -1;
-static int8_t   oled_rst = -1;
-static int8_t   oled_locks = 0;
+static int8_t oled_port = 0;
+static int8_t oled_flip = 0;
+static int8_t oled_dc = -1;
+static int8_t oled_rst = -1;
+static int8_t oled_locks = 0;
 static spi_device_handle_t oled_spi;
 static volatile uint8_t oled_changed = 1;
 static volatile uint8_t oled_update = 0;
@@ -134,24 +134,22 @@ static oled_intensity_t oled_contrast = 255;
 
 /* drawing state */
 static oled_pos_t x = 0,
-                y = 0;          /* position */
+    y = 0;                      /* position */
 static oled_align_t a = 0;      /* alignment and movement */
-static char     f = 0,          /* colour */
-                b = 0;
+static char f = 0,              /* colour */
+    b = 0;
 static uint32_t f_mul = 0,
-                b_mul = 0;      /* actual f/b colour multiplier */
+    b_mul = 0;                  /* actual f/b colour multiplier */
 
 /* state control */
-void
-oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
+void oled_pos(oled_pos_t newx, oled_pos_t newy, oled_align_t newa)
 {                               /* Set position */
    x = newx;
    y = newy;
    a = (newa ? : (OLED_L | OLED_T | OLED_H));
 }
 
-static          uint32_t
-oled_colour_lookup(char c)
+static uint32_t oled_colour_lookup(char c)
 {                               /* character to colour mapping, default is white */
    switch (c)
    {
@@ -193,59 +191,51 @@ oled_colour_lookup(char c)
    return WHITE;
 }
 
-void
-oled_colour(char newf)
+void oled_colour(char newf)
 {                               /* Set foreground */
    f_mul = oled_colour_lookup(f = newf);
 }
 
-void
-oled_background(char newb)
+void oled_background(char newb)
 {                               /* Set background */
    b_mul = oled_colour_lookup(b = newb);
 }
 
 /* State get */
-oled_pos_t
-oled_x(void)
+oled_pos_t oled_x(void)
 {
    return x;
 }
 
-oled_pos_t
-oled_y(void)
+oled_pos_t oled_y(void)
 {
    return y;
 }
 
-oled_align_t
-oled_a(void)
+oled_align_t oled_a(void)
 {
    return a;
 }
 
-char
-oled_f(void)
+char oled_f(void)
 {
    return f;
 }
 
-char
-oled_b(void)
+char oled_b(void)
 {
    return b;
 }
 
 /* support */
-inline void
-oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
+inline void oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 {                               /* set a pixel */
    if (x < 0 || x >= CONFIG_OLED_WIDTH || y < 0 || y >= CONFIG_OLED_HEIGHT)
       return;                   /* out of display */
 #if CONFIG_OLED_BPP <= 8
 #error	Not coded greyscale yet
 #else
-   uint16_t        v = ntohs(f_mul * (i >> ISHIFT) + b_mul * ((0xFF ^ i) >> ISHIFT));
+   uint16_t v = ntohs(f_mul * (i >> ISHIFT) + b_mul * ((0xFF ^ i) >> ISHIFT));
    if (v != oled[(y * CONFIG_OLED_WIDTH) + x])
    {
       oled[(y * CONFIG_OLED_WIDTH) + x] = v;
@@ -254,11 +244,10 @@ oled_pixel(oled_pos_t x, oled_pos_t y, oled_intensity_t i)
 #endif
 }
 
-static void
-oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t wm, oled_pos_t hm, oled_pos_t * xp, oled_pos_t * yp)
+static void oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t wm, oled_pos_t hm, oled_pos_t * xp, oled_pos_t * yp)
 {                               /* move x/y based on drawing a box w/h, set x/y as top left of said box */
-   oled_pos_t      l = x,
-                   t = y;
+   oled_pos_t l = x,
+       t = y;
    if ((a & OLED_C) == OLED_C)
       l -= (w - 1) / 2;
    else if (a & OLED_R)
@@ -287,8 +276,7 @@ oled_draw(oled_pos_t w, oled_pos_t h, oled_pos_t wm, oled_pos_t hm, oled_pos_t *
       *yp = t;
 }
 
-static void
-oled_block16(oled_pos_t x, oled_pos_t y, oled_pos_t w, oled_pos_t h, const uint8_t * data, int l)
+static void oled_block16(oled_pos_t x, oled_pos_t y, oled_pos_t w, oled_pos_t h, const uint8_t * data, int l)
 {                               /* Draw a block from 16 bit greyscale data, l is data width for each row */
    if (!l)
       l = (w + 1) / 2;          /* default is pixels width */
@@ -296,7 +284,7 @@ oled_block16(oled_pos_t x, oled_pos_t y, oled_pos_t w, oled_pos_t h, const uint8
    {
       for (oled_pos_t col = 0; col < w; col++)
       {
-         uint8_t         v = data[col / 2];
+         uint8_t v = data[col / 2];
          oled_pixel(x + col, y + row, (v & 0xF0) | (v >> 4));
          col++;
          if (col < w)
@@ -307,8 +295,7 @@ oled_block16(oled_pos_t x, oled_pos_t y, oled_pos_t w, oled_pos_t h, const uint8
 }
 
 /* drawing */
-void
-oled_clear(oled_intensity_t i)
+void oled_clear(oled_intensity_t i)
 {
    if (!oled)
       return;
@@ -317,8 +304,7 @@ oled_clear(oled_intensity_t i)
          oled_pixel(x, y, i);
 }
 
-void
-oled_set_contrast(oled_intensity_t contrast)
+void oled_set_contrast(oled_intensity_t contrast)
 {
    if (!oled)
       return;
@@ -327,11 +313,10 @@ oled_set_contrast(oled_intensity_t contrast)
    oled_changed = 1;
 }
 
-void
-oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
+void oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
 {                               /* draw a box, not filled */
-   oled_pos_t      x,
-                   y;
+   oled_pos_t x,
+    y;
    oled_draw(w, h, 0, 0, &x, &y);
    for (oled_pos_t n = 0; n < w; n++)
    {
@@ -345,42 +330,39 @@ oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
    }
 }
 
-void
-oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
+void oled_fill(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
 {                               /* draw a filled rectangle */
-   oled_pos_t      x,
-                   y;
+   oled_pos_t x,
+    y;
    oled_draw(w, h, 0, 0, &x, &y);
    for (oled_pos_t row = 0; row < h; row++)
       for (oled_pos_t col = 0; col < w; col++)
          oled_pixel(x + col, y + row, i);
 }
 
-void
-oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
+void oled_icon16(oled_pos_t w, oled_pos_t h, const void *data)
 {                               /* Icon, 16 bit packed */
    if (!data)
       oled_fill(w, h, 0);       /* No icon */
    else
    {
-      oled_pos_t      x,
-                      y;
+      oled_pos_t x,
+       y;
       oled_draw(w, h, 0, 0, &x, &y);
       oled_block16(x, y, w, h, data, 0);
    }
 }
 
-void
-oled_text(int8_t size, const char *fmt,...)
+void oled_text(int8_t size, const char *fmt, ...)
 {                               /* Size negative for descenders */
    if (!oled)
       return;
-   va_list         ap;
-   char            temp[CONFIG_OLED_WIDTH / 4 + 2];
+   va_list ap;
+   char temp[CONFIG_OLED_WIDTH / 4 + 2];
    va_start(ap, fmt);
    vsnprintf(temp, sizeof(temp), fmt, ap);
    va_end(ap);
-   int             z = 7;       /* effective height */
+   int z = 7;                   /* effective height */
    if (size < 0)
    {                            /* indicates descenders allowed */
       size = -size;
@@ -391,13 +373,12 @@ oled_text(int8_t size, const char *fmt,...)
       size = sizeof(fonts) / sizeof(*fonts);
    if (!fonts[size])
       return;
-   int             fontw = (size ? 6 * size : 4);       /* pixel width of characters in font file */
-   int             fonth = (size ? 9 * size : 5);       /* pixel height of characters in font file */
+   int fontw = (size ? 6 * size : 4);   /* pixel width of characters in font file */
+   int fonth = (size ? 9 * size : 5);   /* pixel height of characters in font file */
 
-   int             w = 0;       /* width of overall text */
-   int             h = z * (size ? : 1);        /* height of overall text */
-   int             cwidth(char c)
-   {                            /* character width as printed - some characters are done narrow, and <' ' is fixed size move */
+   int w = 0;                   /* width of overall text */
+   int h = z * (size ? : 1);    /* height of overall text */
+   int cwidth(char c) {         /* character width as printed - some characters are done narrow, and <' ' is fixed size move */
       if (c & 0x80)
          return 0;
       if (size)
@@ -407,23 +388,24 @@ oled_text(int8_t size, const char *fmt,...)
          if (c == ':' || c == '.')
             return size * 2;
       }
-                      return fontw;
+      return fontw;
    }
-   const uint8_t  *fontdata(char c)
-   {
-      const uint8_t  *d = fonts[size] + (c - ' ') * fonth * fontw / 2;
-      if              (c == ':' || c == '.')
-                         d += size;
-                    //2 pixels in
-                      return d;
+   const uint8_t *fontdata(char c) {
+      const uint8_t *d = fonts[size] + (c - ' ') * fonth * fontw / 2;
+      if (c == ':' || c == '.')
+         d += size;
+      //2 pixels in
+      return d;
    }
-   for             (char *p = temp; *p; p++)
+   for (char *p = temp; *p; p++)
       w += cwidth(*p);
-   oled_pos_t      x,
-                   y;
+   oled_pos_t x,
+    y;
    if (w)
       w -= (size ? : 1);        /* Margin right hand pixel needs removing from width */
    oled_draw(w, h, size ? : 1, size ? : 1, &x, &y);     /* starting point */
+   if (!w)
+      return;                   /* nothing to print */
    for (oled_pos_t n = -1; n <= w; n++)
    {
       oled_pixel(x + n, y - 1, 0);
@@ -436,8 +418,8 @@ oled_text(int8_t size, const char *fmt,...)
    }
    for (char *p = temp; *p; p++)
    {
-      int             c = *p;
-      int             charw = cwidth(c);
+      int c = *p;
+      int charw = cwidth(c);
       if (charw)
       {
          if (c < ' ')
@@ -450,21 +432,19 @@ oled_text(int8_t size, const char *fmt,...)
    }
 }
 
-static          esp_err_t
-oled_cmd(uint8_t cmd)
+static esp_err_t oled_cmd(uint8_t cmd)
 {                               /* Send command */
    gpio_set_level(oled_dc, 0);
    spi_transaction_t t = {
       .length = 8,
-      .tx_data = {cmd},
+      .tx_data = { cmd },
       .flags = SPI_TRANS_USE_TXDATA,
    };
-   esp_err_t       e = spi_device_polling_transmit(oled_spi, &t);
+   esp_err_t e = spi_device_polling_transmit(oled_spi, &t);
    return e;
 }
 
-static          esp_err_t
-oled_data(int len, void *data)
+static esp_err_t oled_data(int len, void *data)
 {                               /* Send data */
    gpio_set_level(oled_dc, 1);
    spi_transaction_t c = {
@@ -474,56 +454,52 @@ oled_data(int len, void *data)
    return spi_device_transmit(oled_spi, &c);
 }
 
-static          esp_err_t
-oled_cmd1(uint8_t cmd, uint8_t a)
+static esp_err_t oled_cmd1(uint8_t cmd, uint8_t a)
 {                               /* Send a command with an arg */
-   esp_err_t       e = oled_cmd(cmd);
+   esp_err_t e = oled_cmd(cmd);
    if (e)
       return e;
    gpio_set_level(oled_dc, 1);
    spi_transaction_t d = {
       .length = 8,
-      .tx_data = {a},
+      .tx_data = { a },
       .flags = SPI_TRANS_USE_TXDATA,
    };
    return spi_device_polling_transmit(oled_spi, &d);
 }
 
-static          esp_err_t
-oled_cmd2(uint8_t cmd, uint8_t a, uint8_t b)
+static esp_err_t oled_cmd2(uint8_t cmd, uint8_t a, uint8_t b)
 {                               /* Send a command with args */
-   esp_err_t       e = oled_cmd(cmd);
+   esp_err_t e = oled_cmd(cmd);
    if (e)
       return e;
    gpio_set_level(oled_dc, 1);
    spi_transaction_t d = {
       .length = 16,
-      .tx_data = {a, b},
+      .tx_data = { a, b },
       .flags = SPI_TRANS_USE_TXDATA,
    };
    return spi_device_polling_transmit(oled_spi, &d);
 }
 
-static          esp_err_t
-oled_cmd3(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c)
+static esp_err_t oled_cmd3(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c)
 {                               /* Send a command with args */
-   esp_err_t       e = oled_cmd(cmd);
+   esp_err_t e = oled_cmd(cmd);
    if (e)
       return e;
    gpio_set_level(oled_dc, 1);
    spi_transaction_t d = {
       .length = 24,
-      .tx_data = {a, b, c},
+      .tx_data = { a, b, c },
       .flags = SPI_TRANS_USE_TXDATA,
    };
    return spi_device_polling_transmit(oled_spi, &d);
 }
 
-static void
-oled_task(void *p)
+static void oled_task(void *p)
 {
-   int             try = 10;
-   esp_err_t       e = 0;
+   int try = 10;
+   esp_err_t e = 0;
    usleep(300000);              /* 300ms to start up */
    while (try--)
    {
@@ -562,7 +538,7 @@ oled_task(void *p)
       oled_cmd2(0x15, 0, 127);
       oled_cmd2(0x75, 0, 127);
       oled_cmd(0x5C);
-      oled_data(OLEDSIZE, (void *)oled);
+      oled_data(OLEDSIZE, (void *) oled);
       oled_cmd(0xA6);
       oled_unlock();
       if (!e)
@@ -591,7 +567,7 @@ oled_task(void *p)
       oled_cmd2(0x15, 0, 127);
       oled_cmd2(0x75, 0, 127);
       oled_cmd(0x5C);
-      oled_data(OLEDSIZE, (void *)oled);
+      oled_data(OLEDSIZE, (void *) oled);
       if (oled_update)
       {
          oled_update = 0;
@@ -601,8 +577,7 @@ oled_task(void *p)
    }
 }
 
-const char     *
-oled_start(int8_t port, int8_t cs, int8_t clk, int8_t din, int8_t dc, int8_t rst, int8_t flip)
+const char *oled_start(int8_t port, int8_t cs, int8_t clk, int8_t din, int8_t dc, int8_t rst, int8_t flip)
 {                               /* Start OLED task and display */
    if (din < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(din))
       return "DIN?";
@@ -638,8 +613,7 @@ oled_start(int8_t port, int8_t cs, int8_t clk, int8_t din, int8_t dc, int8_t rst
       config.flags |= SPICOMMON_BUSFLAG_IOMUX_PINS;
    if (spi_bus_initialize(port, &config, 2))
       return "Init?";
-   spi_device_interface_config_t devcfg =
-   {
+   spi_device_interface_config_t devcfg = {
       .clock_speed_hz = SPI_MASTER_FREQ_20M | SPI_DEVICE_3WIRE,
       .mode = 0,
       .spics_io_num = cs,
@@ -654,8 +628,7 @@ oled_start(int8_t port, int8_t cs, int8_t clk, int8_t din, int8_t dc, int8_t rst
    return NULL;
 }
 
-void
-oled_lock(void)
+void oled_lock(void)
 {                               /* Lock display task */
    if (oled_mutex)
       xSemaphoreTake(oled_mutex, portMAX_DELAY);
@@ -666,8 +639,7 @@ oled_lock(void)
    oled_pos(0, 0, OLED_L | OLED_T | OLED_H);
 }
 
-void
-oled_unlock(void)
+void oled_unlock(void)
 {                               /* Unlock display task */
    oled_locks--;
    if (oled_mutex)
