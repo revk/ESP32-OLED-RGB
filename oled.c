@@ -185,6 +185,9 @@ oled_colour_lookup(char c)
       return YELLOW;
    case 'w':
       return (WHITE >> 1);
+   case 'o':
+   case 'O':
+      return RED + (GREEN >> 1);
 #endif
    }
    return WHITE;
