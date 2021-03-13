@@ -338,7 +338,7 @@ oled_box(oled_pos_t w, oled_pos_t h, oled_intensity_t i)
       oled_pixel(x + n, y, i);
       oled_pixel(x + n, y + h - 1, i);
    }
-   for (oled_pos_t n = 1; n < w - 1; n++)
+   for (oled_pos_t n = 1; n < h - 1; n++)
    {
       oled_pixel(x, y + n, i);
       oled_pixel(x + w - 1, y + n, i);
@@ -429,7 +429,7 @@ oled_text(int8_t size, const char *fmt,...)
       oled_pixel(x + n, y - 1, 0);
       oled_pixel(x + n, y + h, 0);
    }
-   for (oled_pos_t n = 0; n < w; n++)
+   for (oled_pos_t n = 0; n < h; n++)
    {
       oled_pixel(x - 1, y + n, 0);
       oled_pixel(x + w, y + n, 0);
