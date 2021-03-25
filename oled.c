@@ -482,6 +482,7 @@ static esp_err_t oled_cmd2(uint8_t cmd, uint8_t a, uint8_t b)
    return spi_device_polling_transmit(oled_spi, &d);
 }
 
+#if 0
 static esp_err_t oled_cmd3(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c)
 {                               /* Send a command with args */
    esp_err_t e = oled_cmd(cmd);
@@ -495,6 +496,7 @@ static esp_err_t oled_cmd3(uint8_t cmd, uint8_t a, uint8_t b, uint8_t c)
    };
    return spi_device_polling_transmit(oled_spi, &d);
 }
+#endif
 
 static void oled_task(void *p)
 {
